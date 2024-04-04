@@ -1,156 +1,324 @@
--- total trips
-select count(distinct tripid) from trips_details4;
+-- 1. Total Amount Spent by Each Customer on Zomato
+-- 2. How many days each customer visited Zomato?
+-- 3. What is the first product purchased by each customer?
+-- 4. What is the most purchased item in the menu and how many times it was purchased by all customers?
+-- 5. Which item was most popular for each customer?
+-- 6. Which item was first purchased by the customer after they became a gold member?
+-- 7. Which item was purchased by the customer just before they became a gold member?
+-- 8. What is the total orders and amount spent for each customer before they became a gold member?
+-- 9. Calculate points collected by each customer and which product has the most points till now.
+-- 10. In the first one year after a customer joins the gold program (including the joining date), irrespective of what the customer has purchased, they earn 5 zomato points for every 10 rps spent. Who earned 1 or 3 points, and what was their points earnings in their first year?
+-- 11. Rank all transactions of all customers.
+-- 12. Rank all transactions for each member when they are a gold zomato member, and for every non-gold member transaction, mark as 'na'.
 
---total trip with duplicates
-select tripid,count(tripid) from trips_details4
-group by tripid
-having count(tripid) > 1;
+----------------------------------------------------------------------------------------------------------------------------------------------
 
--- total drivers
-select count(distinct driverid) from trips;
+-- 1. Total Amount Spent by Each Customer on Zomato:
+SELECT DISTINCT
+       s.userid,
+       SUM(p.price) AS total_amt_sum
+FROM
+       Sales s
+JOIN
+       Product p
+ON
+       s.product_id = p.product_id
+GROUP BY
+       s.userid;
 
---total earnings
-select sum(fare) from trips;
+-- 2. How many days each customer visited Zomato?
+SELECT
+       userid,
+       COUNT(DISTINCT created_date) AS days_count
+FROM
+       Sales
+GROUP BY
+       userid;
 
---total searches
-select sum(searches) from trips_details4;
+-- 3. What is the first product purchased by each customer?
+SELECT
+       *
+FROM
+       (
+              SELECT
+                     *,
+                     RANK() OVER
+                                (
+                                       PARTITION BY userid
+                                       ORDER BY created_date ASC
+                                )
+                     AS rnk
+              FROM
+                     Sales
+       ) a
+WHERE
+       rnk = 1;
 
---total searches which got estimate
-select sum(searches_got_estimate) from trips_details4;
+-- 4. What is the most purchased item in the menu and how many times it was purchased by all customers?
+SELECT
+       userid,
+       COUNT(product_id) AS cnt
+FROM
+       sales
+WHERE
+       product_id = (
+              SELECT
+                     product_id
+              FROM
+                     sales
+              GROUP BY
+                     product_id
+              ORDER BY
+                     COUNT(product_id) DESC
+              LIMIT 1
+       )
+GROUP BY
+       userid;
 
---total searches for quotes
-select sum(searches_for_quotes) from trips_details4;
+-- 5. Which item was most popular for each customer?
+SELECT
+       *
+FROM
+       (
+              SELECT
+                     *,
+                     RANK() OVER
+                                (
+                                       PARTITION BY userid
+                                       ORDER BY cnt DESC
+                                )
+                     AS rnk
+              FROM
+                     (
+                            SELECT
+                                   userid,
+                                   product_id,
+                                   COUNT(product_id) AS cnt
+                            FROM
+                                   sales
+                            GROUP BY
+                                   1, 2
+                     ) a
+       ) b
+WHERE
+       rnk = 1;
 
---total completed trips
-select count(end_ride) from trips_details4
-where end_ride = 1;
+-- 6. Which item was first purchased by the customer after they became a gold member?
+SELECT
+       *
+FROM
+       (
+              SELECT
+                     a.*,
+                     RANK() OVER
+                                (
+                                       PARTITION BY userid
+                                       ORDER BY created_date
+                                )
+                     AS rnk
+              FROM
+                     (
+                            SELECT
+                                   a.userid,
+                                   a.created_date,
+                                   a.product_id,
+                                   b.gold_signup_date
+                            FROM
+                                   sales a
+                            INNER JOIN
+                                   goldusers_signup b
+                            ON
+                                   a.userid = b.userid
+                            AND created_date >= gold_signup_date
+                     ) a
+       ) b
+WHERE
+       rnk = 1;
 
---total driver cancelled
-select count(*) - sum(driver_not_cancelled) from trips_details4;
+-- 7. Which item was purchased by the customer just before they became a gold member?
+SELECT
+       *
+FROM
+       (
+              SELECT
+                     a.*,
+                     RANK() OVER
+                                (
+                                       PARTITION BY userid
+                                       ORDER BY created_date DESC
+                                )
+                     AS rnk
+              FROM
+                     (
+                            SELECT
+                                   a.userid,
+                                   a.created_date,
+                                   a.product_id,
+                                   b.gold_signup_date
+                            FROM
+                                   sales a
+                            INNER JOIN
+                                   goldusers_signup b
+                            ON
+                                   a.userid = b.userid
+                            AND created_date <= gold_signup_date
+                     ) a
+       ) b
+WHERE
+       rnk = 1;
 
---total otp entered
-select sum(otp_entered) from trips_details4;
+-- 8. What is the total orders and amount spent for each customer before they became a gold member?
+SELECT
+       userid,
+       COUNT(created_date) AS order_purchased,
+       SUM(price) AS total_amount_spent
+FROM
+       (
+              SELECT
+                     c.*,
+                     d.price
+              FROM
+                     (
+                            SELECT
+                                   a.userid,
+                                   a.created_date,
+                                   a.product_id,
+                                   b.gold_signup_date
+                            FROM
+                                   sales a
+                            INNER JOIN
+                                   goldusers_signup b
+                            ON
+                                   a.userid = b.userid
+                            AND created_date <= gold_signup_date
+                     ) c
+              JOIN
+                     product d
+              ON
+                     c.product_id = d.product_id
+       )
+GROUP BY
+       userid;
 
---total end ride
-select sum(end_ride) from trips_details4;
+-- 9. Calculate points collected by each customer and which product has the most points till now.
+SELECT
+       product_id,
+       SUM(total_points) AS total_points_earned
+FROM
+       (
+              SELECT
+                     e.*,
+                     amount / points AS total_points
+              FROM
+                     (
+                            SELECT
+                                   d.*,
+                                   CASE
+                                          WHEN product_id = 1 THEN 5
+                                          WHEN product_id = 2 THEN 2
+                                          WHEN product_id = 3 THEN 5
+                                          ELSE 0
+                                   END AS points
+                            FROM
+                                   (
+                                          SELECT
+                                                 c.userid,
+                                                 c.product_id,
+                                                 SUM(price) AS amount
+                                          FROM
+                                                 (
+                                                        SELECT
+                                                               a.*,
+                                                               b.price
+                                                        FROM
+                                                               sales a
+                                                        JOIN
+                                                               product b
+                                                        ON
+                                                               a.product_id = b.product_id
+                                                 ) c
+                                          GROUP BY
+                                                 userid,
+                                                 product_id
+                                   ) d
+                     ) e
+       )
+GROUP BY
+       product_id;
 
---average distance per trip
-select avg(distance) from trips;
+-- 10. In the first one year after a customer joins the gold program (including the joining date), irrespective of what the customer has purchased, they earn 5 zomato points for every 10 rps spent. Who earned 1 or 3 points, and what was their points earnings in their first year?
+SELECT
+       c.*,
+       d.price * 0.5 AS total_points_earned
+FROM
+       (
+              SELECT
+                     a.userid,
+                     a.created_date,
+                     a.product_id,
+                     b.gold_signup_date
+              FROM
+                     sales a
+              JOIN
+                     goldusers_signup b
+              ON
+                     a.userid = b.userid
+              AND created_date >= gold_signup_date
+              AND created_date <= DATEADD(year, 1, gold_signup_date)
+       ) c
+INNER JOIN
+       product d
+ON
+       a.product_id = d.product_id;
 
---distance travelled
-select sum(distance) from trips;
-
---which is the most used payment method
-
-select method,faremethod,count(faremethod) as counts
-from trips a join payment b
-on a.faremethod = b.id
-group by 1,2
-order by counts desc
-limit 1;
-
---highest payment was done through which instrument?
-select method from payment a
-join 
-(select faremethod,max(fare) from 
-trips) b 
-on a.id = b.faremethod;
-
---which two locations had the most number of trips?
-select * from
-(
-select *,dense_rank() over (order by trip desc) rnk 
-from (
-select loc_from,loc_to,count(distinct tripid) trip
-from trips
-group by 1,2
-order by trip desc )a)b
-where rnk  = 1;
-
--- top 5 earning drivers
-select * from
-(
-select *,dense_rank() over (order by fare desc) rnk 
-  from
-(
-select driverid,sum(fare) fare
-from trips
-group by 1)a)b where rnk <= 5
-;
-
---which duration had more trips
-select * from 
-(
-select *,dense_rank() over (order by trips desc) rnk 
-  from
-  (
-select duration,count(tripid) trips
-from trips
-group by 1
-    )a)b
-    where rnk = 1;
-    
---which driver customer pairs has more order?
-select * from
-(
-select *,dense_rank() over (order by trips desc) rnk 
-  from
-  (
-select driverid,custid,count(tripid) trips
-from trips
-group by 1,2)a)b
-where rnk = 1;
-
---search to estimate rate
-select  Round(sum(searches_got_estimate)*1.0/sum(searches),2)*100 as search_to_estimate_rate from trips_details4;
-
---which area got highest trips from which duration?
-select * from
-(
-select *,dense_rank() over (partition by duration order by cnt desc) rnk 
-  from
-  (
-select duration,loc_from,count(tripid) cnt
-from trips
-group by 1,2)a)b
-where rnk = 1;
-
---which duration got highest number of trips in each of the location?
-
-(
-select *,dense_rank() over (partition by loc_from order by cnt desc) rnk 
-  from
-  (
-select duration,loc_from,count(tripid) cnt
-from trips
-group by 1,2)a)b
-where rnk = 1;
-
---which area got highest fares,cancellations,trips?
-select * from 
-(
-select *,rank() over (order by fare desc) rnk 
-from
-(
-select loc_from,sum(fare) fare from 
-trips
-group by 1)a)b
-where rnk = 1
-
-select * from
-(
-select *,rank() over (order by can desc) rnk
-  from
-  (
-select loc_from,(count(*) - sum(driver_not_cancelled)) can
-from Trips_details4
-group by 1)a)b
-where rnk = 1
-
---which duration has highest number of trips and fairs?
-select * from (select *,rank() over (order by fare desc) rnk
-               from
+-- 11. Rank all transactions of all customers.
+SELECT
+       *,
+       RANK() OVER
                (
-select duration,count(tripid) fare from trips
-group by 1)a)b
-where rnk = 1
+                      PARTITION BY userid
+                      ORDER BY created_date ASC
+               )
+FROM
+       sales;
+
+-- 12. Rank all transactions for each member when they are a gold zomato member, and for every non-gold member transaction, mark as 'na'.
+SELECT
+       e.*,
+       CASE
+              WHEN rnk = 0 THEN 'na'
+              ELSE CAST(rnk AS VARCHAR)
+       END AS rnkk
+FROM
+       (
+              SELECT
+                     c.*,
+                     CAST(
+                            (
+                                   CASE
+                                          WHEN gold_signup_date IS NULL THEN 0
+                                          ELSE RANK() OVER
+                                                          (
+                                                                 PARTITION BY userid
+                                                                 ORDER BY created_date DESC
+                                                          )
+                                   END
+                            ) AS VARCHAR
+                     ) AS rnk
+              FROM
+                     (
+                            SELECT
+                                   a.userid,
+                                   a.created_date,
+                                   a.product_id,
+                                   b.gold_signup_date
+                            FROM
+                                   sales a
+                            LEFT JOIN
+                                   goldusers_signup b
+                            ON
+                                   a.userid = b.userid
+                            AND created_date >= gold_signup_date
+                     ) c
+       ) e;
+
